@@ -71,8 +71,10 @@ Create or update `src/hooks.server.ts`:
 
 ```ts
 import { handleSession } from 'sk-sesher';
+// if you have multiple handlers
+import { sequence } from "@sveltejs/kit"
 
-export const handle = handleSession();
+export const handle = handleSession(); // alternatively sequence(handleSession)
 ```
 
 ### 5. Pass Session to Client
