@@ -1,16 +1,16 @@
 {
 	"name": "sk-sesher",
-	"version": "0.0.1",
+	"version": "0.0.3",
 	"description": "Simple password-based session management for SvelteKit personal projects",
 	"author": "Neville Brem",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/nevillebrem/sk-sesher.git"
+		"url": "git+https://github.com/nevthereal/sk-sesher.git"
 	},
-	"homepage": "https://github.com/nevillebrem/sk-sesher#readme",
+	"homepage": "https://github.com/nevthereal/sk-sesher#readme",
 	"bugs": {
-		"url": "https://github.com/nevillebrem/sk-sesher/issues"
+		"url": "https://github.com/nevthereal/sk-sesher/issues"
 	},
 	"scripts": {
 		"dev": "vite dev",
@@ -39,7 +39,7 @@
 			"types": "./dist/index.d.ts",
 			"svelte": "./dist/index.js"
 		},
-		"./auth.remote": {
+		"./auth/remote": {
 			"types": "./dist/auth.remote.d.ts",
 			"svelte": "./dist/auth.remote.js"
 		}

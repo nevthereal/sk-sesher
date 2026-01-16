@@ -8,7 +8,6 @@ Uses SvelteKit's experimental [remote functions](https://svelte.dev/docs/kit/rem
 
 - Password-based authentication via environment variable
 - Progressive enhancement with form-based sign in
-- Pre-built `SignIn` component (or build your own)
 - Cookie-based session management
 - Full TypeScript support
 - Works without JavaScript (graceful degradation)
@@ -72,9 +71,9 @@ Create or update `src/hooks.server.ts`:
 ```ts
 import { handleSession } from 'sk-sesher';
 // if you have multiple handlers
-import { sequence } from "@sveltejs/kit"
+import { sequence } from '@sveltejs/kit/hooks';
 
-export const handle = handleSession(); // alternatively sequence(handleSession)
+export const handle = handleSession(); // alternatively sequence(handleSession())
 ```
 
 ### 5. Pass Session to Client
@@ -95,8 +94,7 @@ Create `src/routes/+layout.svelte`:
 
 ```svelte
 <script>
-	import { SignIn } from 'sk-sesher';
-	import { signOut } from 'sk-sesher/auth.remote';
+	import { signIn, signOut } from 'sk-sesher/auth/remote';
 	import { invalidateAll } from '$app/navigation';
 
 	let { data, children } = $props();
@@ -105,13 +103,37 @@ Create `src/routes/+layout.svelte`:
 		await signOut();
 		await invalidateAll();
 	}
+
+	const enhanced = signIn.enhance(async ({ submit }) => {
+		await submit();
+		if (signIn.result?.success) {
+			await invalidateAll();
+		}
+	});
 </script>
 
 {#if data.session.isAuthenticated}
 	<button onclick={handleSignOut}>Sign Out</button>
 	{@render children()}
 {:else}
-	<SignIn />
+	<form {...enhanced}>
+		<label>
+			Password
+			<input {...signIn.fields._password.as('password')} />
+		</label>
+
+		{#each signIn.fields._password.issues() as issue}
+			<p class="error">{issue.message}</p>
+		{/each}
+
+		{#if signIn.result?.error}
+			<p class="error">{signIn.result.error}</p>
+		{/if}
+
+		<button disabled={!!signIn.pending}>
+			{signIn.pending ? 'Signing in...' : 'Sign In'}
+		</button>
+	</form>
 {/if}
 ```
 
@@ -148,13 +170,17 @@ export const handle = sequence(
 );
 ```
 
-## Custom Sign In Form
+## Remote Functions
 
-If you prefer to build your own sign-in form instead of using the pre-built `SignIn` component:
+This library provides two remote functions for authentication:
+
+### `signIn` (form)
+
+A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that handles password authentication with progressive enhancement.
 
 ```svelte
 <script>
-	import { signIn } from 'sk-sesher/auth.remote';
+	import { signIn } from 'sk-sesher/auth/remote';
 	import { invalidateAll } from '$app/navigation';
 
 	// Use enhance for progressive enhancement
@@ -188,7 +214,33 @@ If you prefer to build your own sign-in form instead of using the pre-built `Sig
 </form>
 ```
 
+**Key features:**
+
+- Spread `{...enhanced}` onto your `<form>` element for progressive enhancement
+- Use `signIn.fields._password.as('password')` to get the input attributes
+- Access validation issues via `signIn.fields._password.issues()`
+- Check `signIn.result?.error` for server-side errors (e.g., wrong password)
+- Check `signIn.pending` to show loading state
+
 > **Note:** The password field is named `_password` (with underscore) to prevent it from being sent back to the client on validation errors, as per SvelteKit's [sensitive data handling](https://svelte.dev/docs/kit/remote-functions#form-Handling-sensitive-data).
+
+### `signOut` (command)
+
+A [remote command](https://svelte.dev/docs/kit/remote-functions#command) that clears the session cookie.
+
+```svelte
+<script>
+	import { signOut } from 'sk-sesher/auth/remote';
+	import { invalidateAll } from '$app/navigation';
+
+	async function handleSignOut() {
+		await signOut();
+		await invalidateAll(); // Refresh page data to reflect logged-out state
+	}
+</script>
+
+<button onclick={handleSignOut}>Sign Out</button>
+```
 
 ## API Reference
 
@@ -197,12 +249,11 @@ If you prefer to build your own sign-in form instead of using the pre-built `Sig
 | Export          | Type                  | Description                                         |
 | --------------- | --------------------- | --------------------------------------------------- |
 | `handleSession` | `(config?) => Handle` | Creates the session management hook                 |
-| `SignIn`        | `Component`           | Pre-built sign-in form component                    |
 | `SessionConfig` | `type`                | Configuration options type                          |
 | `Session`       | `type`                | Session state type (`{ isAuthenticated: boolean }`) |
 | `SessionLocals` | `type`                | Type to extend `App.Locals`                         |
 
-### Exports from `sk-sesher/auth.remote`
+### Exports from `sk-sesher/auth/remote`
 
 | Export    | Type            | Description                                     |
 | --------- | --------------- | ----------------------------------------------- |

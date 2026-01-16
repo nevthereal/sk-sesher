@@ -2,7 +2,6 @@
 	import './layout.css';
 	import { signOut } from '$lib/auth.remote.js';
 	import { invalidateAll } from '$app/navigation';
-	import SignIn from '$lib/SignIn.svelte';
 
 	let { data, children } = $props();
 
@@ -25,6 +24,4 @@
 	<main class="p-8">
 		{@render children()}
 	</main>
-{:else}
-	<SignIn />
-{/if}
+{:else}{/if}
