@@ -190,12 +190,10 @@ A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that handles 
 		<input {...signIn.fields._password.as('password')} />
 	</label>
 
-	<!-- Validation errors -->
 	{#each signIn.fields._password.issues() as issue}
 		<p class="error">{issue.message}</p>
 	{/each}
 
-	<!-- Server-side errors (wrong password) -->
 	{#if signIn.result?.error}
 		<p class="error">{signIn.result.error}</p>
 	{/if}
