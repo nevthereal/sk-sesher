@@ -106,10 +106,15 @@ Create `src/routes/+layout.svelte`:
 	import { invalidateAll } from '$app/navigation';
 
 	let { data, children } = $props();
+	
+	async function handleSignOut () {
+	  await signOut()
+		await invalidateAll()
+	}
 </script>
 
 {#if data.session.isAuthenticated}
-	<button onclick={() => signOut().then(() => invalidate())}>Sign Out</button>
+	<button onclick={handleSignOut}>Sign Out</button>
 	{@render children()}
 {:else}
 	<form {...signIn}>
@@ -164,7 +169,7 @@ export const handle = sequence(
 
 ## Remote Functions
 
-This library provides two remote functions for authentication:
+This library provides two remote functions for authentication. Please keep in mind to re-export these from *your own `src/lib` folder*, otherwise they won't work. And turn on the experimental flags.
 
 ### `signIn` (form)
 
@@ -172,19 +177,11 @@ A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that handles 
 
 ```svelte
 <script>
-	import { signIn } from 'sk-sesher/auth/remote';
+	import { signIn } from '$lib/remote/auth.remote';
 	import { invalidateAll } from '$app/navigation';
-
-	// Use enhance for progressive enhancement
-	const enhanced = signIn.enhance(async ({ submit }) => {
-		await submit();
-		if (signIn.result?.success) {
-			await invalidateAll();
-		}
-	});
 </script>
 
-<form {...enhanced}>
+<form {...signIn}>
 	<label>
 		Password
 		<input {...signIn.fields._password.as('password')} />
@@ -194,10 +191,6 @@ A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that handles 
 		<p class="error">{issue.message}</p>
 	{/each}
 
-	{#if signIn.result?.error}
-		<p class="error">{signIn.result.error}</p>
-	{/if}
-
 	<button disabled={!!signIn.pending}>
 		{signIn.pending ? 'Signing in...' : 'Sign In'}
 	</button>
@@ -206,7 +199,7 @@ A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that handles 
 
 **Key features:**
 
-- Spread `{...enhanced}` onto your `<form>` element for progressive enhancement
+- Spread `{...signIn}` onto your `<form>` element for progressive enhancement
 - Use `signIn.fields._password.as('password')` to get the input attributes
 - Access validation issues via `signIn.fields._password.issues()`
 - Check `signIn.result?.error` for server-side errors (e.g., wrong password)
@@ -220,7 +213,7 @@ A [remote command](https://svelte.dev/docs/kit/remote-functions#command) that cl
 
 ```svelte
 <script>
-	import { signOut } from 'sk-sesher/auth/remote';
+	import { signOut } from '$lib/remote/auth.remote';
 	import { invalidateAll } from '$app/navigation';
 
 	async function handleSignOut() {
