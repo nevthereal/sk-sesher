@@ -1,6 +1,6 @@
 import { command, form, getRequestEvent } from '$app/server';
 import { env } from '$env/dynamic/private';
-import { error } from '@sveltejs/kit';
+import { error, invalid } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { getSessionConfig } from './handler.js';
 
@@ -41,9 +41,7 @@ export const signIn = form(
 			error(500, 'Server configuration error');
 		}
 
-		if (_password !== expectedPassword) {
-			return { error: 'Invalid password' };
-		}
+		if (_password !== expectedPassword) invalid(issue._password('Password is wrong'));
 
 		event.cookies.set(config.cookieName, 'authenticated', {
 			path: '/',

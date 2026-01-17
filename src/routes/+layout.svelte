@@ -1,27 +1,26 @@
-<script lang="ts">
-	import './layout.css';
-	import { signOut } from '$lib/auth.remote.js';
+<script>
+	import { signIn, signOut } from '$lib/auth.remote.ts';
 	import { invalidateAll } from '$app/navigation';
 
 	let { data, children } = $props();
-
-	async function handleSignOut() {
-		await signOut();
-		await invalidateAll();
-	}
 </script>
 
 {#if data.session.isAuthenticated}
-	<header class="flex items-center justify-between border-b border-gray-300 bg-gray-100 px-8 py-4">
-		<span class="font-medium">You are signed in</span>
-		<button
-			onclick={handleSignOut}
-			class="cursor-pointer rounded border-none bg-gray-800 px-4 py-2 text-white hover:bg-gray-600"
-		>
-			Sign Out
+	<button onclick={() => signOut().then(() => invalidateAll())}>Sign Out</button>
+	{@render children()}
+{:else}
+	<form {...signIn}>
+		<label>
+			Password
+			<input {...signIn.fields._password.as('password')} />
+		</label>
+
+		{#each signIn.fields._password.issues() as issue (issue)}
+			<p class="error">{issue.message}</p>
+		{/each}
+
+		<button disabled={!!signIn.pending}>
+			{signIn.pending ? 'Signing in...' : 'Sign In'}
 		</button>
-	</header>
-	<main class="p-8">
-		{@render children()}
-	</main>
-{:else}{/if}
+	</form>
+{/if}

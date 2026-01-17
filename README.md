@@ -14,7 +14,7 @@ Uses SvelteKit's experimental [remote functions](https://svelte.dev/docs/kit/rem
 
 ## Requirements
 
-- SvelteKit `^2.49.0`
+- SvelteKit `^2.49.0` (this library is only intended to use with SvelteKit!)
 - Svelte `^5.46.0`
 
 ## Installation
@@ -70,10 +70,8 @@ Create or update `src/hooks.server.ts`:
 
 ```ts
 import { handleSession } from 'sk-sesher';
-// if you have multiple handlers
-import { sequence } from '@sveltejs/kit/hooks';
 
-export const handle = handleSession(); // alternatively sequence(handleSession())
+export const handle = handleSession();
 ```
 
 ### 5. Pass Session to Client
@@ -88,35 +86,33 @@ export const load = ({ locals }) => {
 };
 ```
 
-### 6. Create Layout with Auth Check
+### 6. Re-export remote functions inside your `lib` folder
+
+Make sure to export them from any file ending in `.remote.ts`.
+
+```ts
+// src/lib/remote/auth.remote.ts
+
+export { signIn, signOut } from "sk-sesher/auth/remote"
+```
+
+### 7. Create Layout with Auth Check
 
 Create `src/routes/+layout.svelte`:
 
 ```svelte
 <script>
-	import { signIn, signOut } from 'sk-sesher/auth/remote';
+	import { signIn, signOut } from '$lib/remote/auth.remote.ts';
 	import { invalidateAll } from '$app/navigation';
 
 	let { data, children } = $props();
-
-	async function handleSignOut() {
-		await signOut();
-		await invalidateAll();
-	}
-
-	const enhanced = signIn.enhance(async ({ submit }) => {
-		await submit();
-		if (signIn.result?.success) {
-			await invalidateAll();
-		}
-	});
 </script>
 
 {#if data.session.isAuthenticated}
-	<button onclick={handleSignOut}>Sign Out</button>
+	<button onclick={() => signOut().then(() => invalidate())}>Sign Out</button>
 	{@render children()}
 {:else}
-	<form {...enhanced}>
+	<form {...signIn}>
 		<label>
 			Password
 			<input {...signIn.fields._password.as('password')} />
@@ -125,10 +121,6 @@ Create `src/routes/+layout.svelte`:
 		{#each signIn.fields._password.issues() as issue}
 			<p class="error">{issue.message}</p>
 		{/each}
-
-		{#if signIn.result?.error}
-			<p class="error">{signIn.result.error}</p>
-		{/if}
 
 		<button disabled={!!signIn.pending}>
 			{signIn.pending ? 'Signing in...' : 'Sign In'}

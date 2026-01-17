@@ -1,6 +1,6 @@
 {
 	"name": "sk-sesher",
-	"version": "0.0.3",
+	"version": "0.0.5",
 	"description": "Simple password-based session management for SvelteKit personal projects",
 	"author": "Neville Brem",
 	"license": "MIT",
