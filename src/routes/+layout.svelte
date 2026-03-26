@@ -1,5 +1,5 @@
-<script>
-	import { signIn, signOut } from '$lib/auth.remote.ts';
+<script lang="ts">
+	import { signIn, signOut } from '$lib/remote/auth.remote.js';
 	import { invalidateAll } from '$app/navigation';
 
 	let { data, children } = $props();

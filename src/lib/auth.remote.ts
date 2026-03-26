@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import { error, invalid } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { getSessionConfig } from './handler.js';
+import { createSignedSessionValue, delay } from './session.js';
 
 /**
  * Form-based sign in. Spread this onto a `<form>` element for progressive enhancement.
@@ -10,7 +11,7 @@ import { getSessionConfig } from './handler.js';
  * @example
  * ```svelte
  * <script>
- *   import { signIn } from 'sk-sesher/auth.remote';
+ *   import { signIn } from 'sk-sesher/auth/remote';
  * </script>
  *
  * <form {...signIn}>
@@ -41,9 +42,14 @@ export const signIn = form(
 			error(500, 'Server configuration error');
 		}
 
-		if (_password !== expectedPassword) invalid(issue._password('Password is wrong'));
+		if (_password !== expectedPassword) {
+			await delay(config.failureDelayMs);
+			invalid(issue._password('Password is wrong'));
+		}
 
-		event.cookies.set(config.cookieName, 'authenticated', {
+		const sessionValue = await createSignedSessionValue(expectedPassword);
+
+		event.cookies.set(config.cookieName, sessionValue, {
 			path: '/',
 			httpOnly: true,
 			secure: true,
@@ -61,7 +67,7 @@ export const signIn = form(
  * @example
  * ```svelte
  * <script>
- *   import { signOut } from 'sk-sesher/auth.remote';
+ *   import { signOut } from 'sk-sesher/auth/remote';
  *
  *   async function handleSignOut() {
  *     await signOut();

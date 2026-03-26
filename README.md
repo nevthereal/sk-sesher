@@ -93,7 +93,7 @@ Make sure to export them from any file ending in `.remote.ts`.
 ```ts
 // src/lib/remote/auth.remote.ts
 
-export { signIn, signOut } from "sk-sesher/auth/remote"
+export { signIn, signOut } from 'sk-sesher/auth/remote';
 ```
 
 ### 7. Create Layout with Auth Check
@@ -101,15 +101,15 @@ export { signIn, signOut } from "sk-sesher/auth/remote"
 Create `src/routes/+layout.svelte`:
 
 ```svelte
-<script>
-	import { signIn, signOut } from '$lib/remote/auth.remote.ts';
+<script lang="ts">
+	import { signIn, signOut } from '$lib/remote/auth.remote.js';
 	import { invalidateAll } from '$app/navigation';
 
 	let { data, children } = $props();
-	
-	async function handleSignOut () {
-	  await signOut()
-		await invalidateAll()
+
+	async function handleSignOut() {
+		await signOut();
+		await invalidateAll();
 	}
 </script>
 
@@ -169,15 +169,15 @@ export const handle = sequence(
 
 ## Remote Functions
 
-This library provides two remote functions for authentication. Please keep in mind to re-export these from *your own `src/lib` folder*, otherwise they won't work. And turn on the experimental flags.
+This library provides two remote functions for authentication. Please keep in mind to re-export these from _your own `src/lib` folder_, otherwise they won't work. And turn on the experimental flags.
 
 ### `signIn` (form)
 
 A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that handles password authentication with progressive enhancement.
 
 ```svelte
-<script>
-	import { signIn } from '$lib/remote/auth.remote';
+<script lang="ts">
+	import { signIn } from '$lib/remote/auth.remote.js';
 	import { invalidateAll } from '$app/navigation';
 </script>
 
@@ -212,8 +212,8 @@ A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that handles 
 A [remote command](https://svelte.dev/docs/kit/remote-functions#command) that clears the session cookie.
 
 ```svelte
-<script>
-	import { signOut } from '$lib/remote/auth.remote';
+<script lang="ts">
+	import { signOut } from '$lib/remote/auth.remote.js';
 	import { invalidateAll } from '$app/navigation';
 
 	async function handleSignOut() {
@@ -254,7 +254,9 @@ A [remote command](https://svelte.dev/docs/kit/remote-functions#command) that cl
 
 - The password is stored as an environment variable and never exposed to the client
 - Session cookies are `httpOnly`, `secure`, and use `sameSite: 'lax'`
+- Session cookies are signed server-side before they are trusted on later requests
 - The password field uses an underscore prefix (`_password`) to prevent it from being echoed back on form errors
+- Invalid password attempts are delayed slightly to make brute-force attempts less efficient
 - This is designed for **personal projects** with a single shared password, not multi-user authentication
 
 ## License
