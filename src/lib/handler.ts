@@ -1,4 +1,6 @@
+import { env } from '$env/dynamic/private';
 import type { Handle, RequestEvent } from '@sveltejs/kit';
+import { verifySignedSessionValue } from './session.js';
 
 export interface SessionConfig {
 	/**
@@ -18,6 +20,12 @@ export interface SessionConfig {
 	 * @default 60 * 60 * 24 * 7 (7 days)
 	 */
 	maxAge?: number;
+
+	/**
+	 * Delay in milliseconds before returning an invalid password response.
+	 * @default 500
+	 */
+	failureDelayMs?: number;
 }
 
 export interface Session {
@@ -33,7 +41,8 @@ export interface SessionLocals {
 const DEFAULT_CONFIG: Required<SessionConfig> = {
 	envKey: 'SESSION_PASSWORD',
 	cookieName: 'session',
-	maxAge: 60 * 60 * 24 * 7 // 7 days
+	maxAge: 60 * 60 * 24 * 7, // 7 days
+	failureDelayMs: 500
 };
 
 /**
@@ -64,11 +73,14 @@ const DEFAULT_CONFIG: Required<SessionConfig> = {
  * ```
  */
 export function handleSession(config: SessionConfig = {}): Handle {
-	const { envKey, cookieName, maxAge } = { ...DEFAULT_CONFIG, ...config };
+	const { envKey, cookieName, maxAge, failureDelayMs } = { ...DEFAULT_CONFIG, ...config };
 
 	return async ({ event, resolve }) => {
 		const sessionCookie = event.cookies.get(cookieName);
-		const isAuthenticated = sessionCookie === 'authenticated';
+		const expectedPassword = env[envKey];
+		const isAuthenticated = expectedPassword
+			? await verifySignedSessionValue(expectedPassword, sessionCookie)
+			: false;
 
 		// Type assertion needed since library users will augment App.Locals
 		const locals = event.locals as unknown as SessionLocals;
@@ -81,7 +93,8 @@ export function handleSession(config: SessionConfig = {}): Handle {
 		locals._sessionConfig = {
 			envKey,
 			cookieName,
-			maxAge
+			maxAge,
+			failureDelayMs
 		};
 
 		return resolve(event);
