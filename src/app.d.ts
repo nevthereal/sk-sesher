@@ -1,4 +1,4 @@
-import type { SessionLocals } from '$lib/index.js';
+import type { SessionLocals } from '#lib/index.js';
 
 declare global {
 	namespace App {
