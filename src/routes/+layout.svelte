@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { signIn, signOut } from '$lib/remote/auth.remote.js';
-	import { invalidateAll } from '$app/navigation';
+	import { signIn, signOut } from '#lib/remote/auth.remote.js';
+	import { refreshAll } from '$app/navigation';
 
 	let { data, children } = $props();
 </script>
 
 {#if data.session.isAuthenticated}
-	<button onclick={() => signOut().then(() => invalidateAll())}>Sign Out</button>
+	<button onclick={() => signOut().then(() => refreshAll())}>Sign Out</button>
 	{@render children()}
 {:else}
 	<form {...signIn}>

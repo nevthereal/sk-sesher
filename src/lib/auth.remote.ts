@@ -1,17 +1,28 @@
 import { command, form, getRequestEvent } from '$app/server';
-import { env } from '$env/dynamic/private';
-import { error, invalid } from '@sveltejs/kit';
+import { error, invalid, type RequestEvent } from '@sveltejs/kit';
 import * as v from 'valibot';
-import { getSessionConfig } from './handler.js';
-import { createSignedSessionValue, delay } from './session.js';
+import { getSessionInternals } from './handler.js';
+import { attemptSignIn } from './sign-in.js';
+
+function getClientKey(event: RequestEvent): string {
+	try {
+		return event.getClientAddress();
+	} catch {
+		// Some adapters can't determine the client address; fall back to one shared bucket.
+		return 'unknown';
+	}
+}
 
 /**
  * Form-based sign in. Spread this onto a `<form>` element for progressive enhancement.
  *
+ * A wrong password, or too many failed attempts, is reported as an issue on
+ * the `_password` field.
+ *
  * @example
  * ```svelte
  * <script>
- *   import { signIn } from 'sk-sesher/auth/remote';
+ *   import { signIn } from '$lib/remote/auth.remote.js';
  * </script>
  *
  * <form {...signIn}>
@@ -21,10 +32,6 @@ import { createSignedSessionValue, delay } from './session.js';
  *   {/each}
  *   <button>Sign In</button>
  * </form>
- *
- * {#if signIn.result?.error}
- *   <p class="error">{signIn.result.error}</p>
- * {/if}
  * ```
  */
 export const signIn = form(
@@ -33,28 +40,35 @@ export const signIn = form(
 	}),
 	async ({ _password }, issue) => {
 		const event = getRequestEvent();
-		const config = getSessionConfig(event);
+		const internals = getSessionInternals(event);
+		const result = await attemptSignIn(internals, getClientKey(event), _password);
 
-		const expectedPassword = env[config.envKey];
-
-		if (!expectedPassword) {
-			console.error(`[sk-sesher] Environment variable "${config.envKey}" is not set.`);
-			error(500, 'Server configuration error');
+		if (!result.ok) {
+			switch (result.reason) {
+				case 'not-configured':
+					console.error('[sk-sesher] No password configured; sign-in is unavailable.');
+					error(500, 'Server configuration error');
+					break;
+				case 'locked': {
+					const minutes = Math.ceil(result.retryAfterMs / 60_000);
+					invalid(
+						issue._password(
+							`Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`
+						)
+					);
+					break;
+				}
+				case 'wrong-password':
+					invalid(issue._password('Password is wrong'));
+			}
 		}
 
-		if (_password !== expectedPassword) {
-			await delay(config.failureDelayMs);
-			invalid(issue._password('Password is wrong'));
-		}
-
-		const sessionValue = await createSignedSessionValue(expectedPassword);
-
-		event.cookies.set(config.cookieName, sessionValue, {
+		// `secure` is left to SvelteKit's default: on everywhere except http://localhost and dev.
+		event.cookies.set(internals.config.cookieName, result.sessionValue, {
 			path: '/',
 			httpOnly: true,
-			secure: true,
 			sameSite: 'lax',
-			maxAge: config.maxAge
+			maxAge: internals.config.maxAge
 		});
 
 		return { success: true };
@@ -67,22 +81,21 @@ export const signIn = form(
  * @example
  * ```svelte
  * <script>
- *   import { signOut } from 'sk-sesher/auth/remote';
+ *   import { signOut } from '$lib/remote/auth.remote.js';
+ *   import { invalidateAll } from '$app/navigation';
  *
  *   async function handleSignOut() {
  *     await signOut();
- *     // Redirect or update UI
+ *     await invalidateAll();
  *   }
  * </script>
  * ```
  */
 export const signOut = command(async (): Promise<{ success: boolean }> => {
 	const event = getRequestEvent();
-	const config = getSessionConfig(event);
+	const { config } = getSessionInternals(event);
 
-	event.cookies.delete(config.cookieName, {
-		path: '/'
-	});
+	event.cookies.delete(config.cookieName, { path: '/' });
 
 	return { success: true };
 });

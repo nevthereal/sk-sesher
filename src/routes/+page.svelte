@@ -22,9 +22,9 @@
 			session cookie on each request
 		</li>
 		<li>
-			Session state is passed to <code class="rounded bg-gray-200 px-1.5 py-0.5 text-sm"
-				>locals.session</code
-			>
+			Session state is passed to <code class="rounded bg-gray-200 px-1.5 py-0.5 text-sm">
+				locals.session
+			</code>
 		</li>
 		<li>The layout server load function passes it to the client</li>
 		<li>The layout conditionally renders based on authentication state</li>

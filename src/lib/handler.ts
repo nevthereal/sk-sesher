@@ -1,13 +1,27 @@
-import { env } from '$env/dynamic/private';
-import type { Handle, RequestEvent } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
+import { createAttemptLimiter, type AttemptLimiter } from './rate-limit.js';
 import { verifySignedSessionValue } from './session.js';
 
 export interface SessionConfig {
 	/**
-	 * The name of the environment variable that contains the password.
-	 * @default 'SESSION_PASSWORD'
+	 * The shared password, usually read from a private environment variable.
+	 * Pass a function to read it lazily on each request.
+	 *
+	 * It is also the key used to sign session cookies, so changing it signs
+	 * everyone out.
+	 *
+	 * @example
+	 * ```ts
+	 * // SvelteKit 3 (declare SESSION_PASSWORD in src/env.ts)
+	 * import { SESSION_PASSWORD } from '$app/env/private';
+	 * handleSession({ password: () => SESSION_PASSWORD });
+	 *
+	 * // SvelteKit 2
+	 * import { env } from '$env/dynamic/private';
+	 * handleSession({ password: () => env.SESSION_PASSWORD });
+	 * ```
 	 */
-	envKey?: string;
+	password: string | (() => string | undefined);
 
 	/**
 	 * The name of the cookie that stores the session state.
@@ -16,7 +30,8 @@ export interface SessionConfig {
 	cookieName?: string;
 
 	/**
-	 * Cookie max age in seconds.
+	 * Session lifetime in seconds. Used for the cookie's `Max-Age` and enforced
+	 * server-side when the cookie is verified.
 	 * @default 60 * 60 * 24 * 7 (7 days)
 	 */
 	maxAge?: number;
@@ -26,23 +41,57 @@ export interface SessionConfig {
 	 * @default 500
 	 */
 	failureDelayMs?: number;
+
+	/**
+	 * Number of failed sign-in attempts allowed per client within
+	 * `failedAttemptWindowMs` before further attempts are rejected.
+	 * Set to `0` to disable the limit.
+	 * @default 10
+	 */
+	maxFailedAttempts?: number;
+
+	/**
+	 * Window in milliseconds over which failed attempts are counted. A locked-out
+	 * client can try again once the window ends.
+	 * @default 15 * 60 * 1000 (15 minutes)
+	 */
+	failedAttemptWindowMs?: number;
 }
+
+/**
+ * A SvelteKit `handle` hook. Declared structurally (rather than importing `Handle`)
+ * because Kit 2 exports it from `@sveltejs/kit` and Kit 3 from `@sveltejs/kit/hooks`.
+ */
+export type SessionHandle = (input: {
+	event: RequestEvent;
+	resolve: (event: RequestEvent) => Response | Promise<Response>;
+}) => Promise<Response>;
 
 export interface Session {
 	isAuthenticated: boolean;
 }
 
+type ResolvedConfig = Required<Omit<SessionConfig, 'password'>>;
+
+/** @internal */
+export interface SessionInternals {
+	config: ResolvedConfig;
+	getPassword: () => string | undefined;
+	limiter: AttemptLimiter;
+}
+
 export interface SessionLocals {
 	session: Session;
 	/** @internal */
-	_sessionConfig: Required<SessionConfig>;
+	_sesher: SessionInternals;
 }
 
-const DEFAULT_CONFIG: Required<SessionConfig> = {
-	envKey: 'SESSION_PASSWORD',
+const DEFAULT_CONFIG: ResolvedConfig = {
 	cookieName: 'session',
 	maxAge: 60 * 60 * 24 * 7, // 7 days
-	failureDelayMs: 500
+	failureDelayMs: 500,
+	maxFailedAttempts: 10,
+	failedAttemptWindowMs: 15 * 60 * 1000 // 15 minutes
 };
 
 /**
@@ -52,8 +101,9 @@ const DEFAULT_CONFIG: Required<SessionConfig> = {
  * ```ts
  * // src/hooks.server.ts
  * import { handleSession } from 'sk-sesher';
+ * import { SESSION_PASSWORD } from '$app/env/private';
  *
- * export const handle = handleSession();
+ * export const handle = handleSession({ password: () => SESSION_PASSWORD });
  * ```
  *
  * @example
@@ -64,7 +114,7 @@ const DEFAULT_CONFIG: Required<SessionConfig> = {
  *
  * export const handle = sequence(
  *   handleSession({
- *     envKey: 'MY_SECRET_PASSWORD',
+ *     password: () => SESSION_PASSWORD,
  *     cookieName: 'auth',
  *     maxAge: 60 * 60 * 24 // 1 day
  *   }),
@@ -72,40 +122,57 @@ const DEFAULT_CONFIG: Required<SessionConfig> = {
  * );
  * ```
  */
-export function handleSession(config: SessionConfig = {}): Handle {
-	const { envKey, cookieName, maxAge, failureDelayMs } = { ...DEFAULT_CONFIG, ...config };
+export function handleSession(config: SessionConfig): SessionHandle {
+	const { password, ...options } = config;
+	const getPassword = typeof password === 'function' ? password : () => password;
+	let warnedMissingPassword = false;
+
+	const internals: SessionInternals = {
+		config: { ...DEFAULT_CONFIG, ...options },
+		getPassword,
+		limiter: createAttemptLimiter(
+			config.maxFailedAttempts ?? DEFAULT_CONFIG.maxFailedAttempts,
+			config.failedAttemptWindowMs ?? DEFAULT_CONFIG.failedAttemptWindowMs
+		)
+	};
+	const { cookieName, maxAge } = internals.config;
 
 	return async ({ event, resolve }) => {
-		const sessionCookie = event.cookies.get(cookieName);
-		const expectedPassword = env[envKey];
+		const expectedPassword = getPassword();
+
+		if (!expectedPassword && !warnedMissingPassword) {
+			warnedMissingPassword = true;
+			console.error('[sk-sesher] No password configured; every request will be unauthenticated.');
+		}
+
 		const isAuthenticated = expectedPassword
-			? await verifySignedSessionValue(expectedPassword, sessionCookie)
+			? await verifySignedSessionValue(expectedPassword, event.cookies.get(cookieName), maxAge)
 			: false;
 
 		// Type assertion needed since library users will augment App.Locals
 		const locals = event.locals as unknown as SessionLocals;
 
-		locals.session = {
-			isAuthenticated
-		};
-
-		// Store config in locals for use by signIn/signOut
-		locals._sessionConfig = {
-			envKey,
-			cookieName,
-			maxAge,
-			failureDelayMs
-		};
+		locals.session = { isAuthenticated };
+		locals._sesher = internals;
 
 		return resolve(event);
 	};
 }
 
 /**
- * Helper to get session config from event locals.
+ * Reads the state set up by `handleSession`, failing loudly if the hook is missing.
  * @internal
  */
-export function getSessionConfig(event: RequestEvent): Required<SessionConfig> {
-	const locals = event.locals as unknown as SessionLocals;
-	return locals._sessionConfig ?? DEFAULT_CONFIG;
+export function getSessionInternals(event: RequestEvent): SessionInternals {
+	const internals = (event.locals as unknown as Partial<SessionLocals>)._sesher;
+
+	if (!internals) {
+		throw new Error(
+			'[sk-sesher] The handleSession() hook did not run for this request. ' +
+				'Add `export const handle = handleSession({ password: ... });` to src/hooks.server.ts ' +
+				'(or include it in your `sequence(...)`).'
+		);
+	}
+
+	return internals;
 }

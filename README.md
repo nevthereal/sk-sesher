@@ -6,15 +6,15 @@ Uses SvelteKit's experimental [remote functions](https://svelte.dev/docs/kit/rem
 
 ## Features
 
-- Password-based authentication via environment variable
-- Progressive enhancement with form-based sign in
-- Cookie-based session management
+- A single shared password, read from wherever you keep secrets
+- Progressive enhancement with form-based sign in (works without JavaScript)
+- Signed, `httpOnly` session cookies that expire server-side
+- Built-in throttling of failed sign-in attempts
 - Full TypeScript support
-- Works without JavaScript (graceful degradation)
 
 ## Requirements
 
-- SvelteKit `^2.49.0` (this library is only intended to use with SvelteKit!)
+- SvelteKit `^2.49.0` or `^3.0.0` (this library only works with SvelteKit!)
 - Svelte `^5.46.0`
 
 ## Installation
@@ -25,9 +25,27 @@ npm install sk-sesher
 
 ## Quick Start
 
+The examples below use SvelteKit 3. Where SvelteKit 2 differs, the difference is shown right after.
+
 ### 1. Enable Remote Functions
 
-Add the experimental flag to your `svelte.config.js`:
+```js
+// vite.config.js
+import { sveltekit } from '@sveltejs/kit/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+	plugins: [
+		sveltekit({
+			compilerOptions: { experimental: { async: true } },
+			experimental: { remoteFunctions: true }
+		})
+	]
+});
+```
+
+<details>
+<summary>SvelteKit 2</summary>
 
 ```js
 // svelte.config.js
@@ -40,15 +58,55 @@ export default {
 };
 ```
 
-### 2. Set Environment Variable
+</details>
 
-Create a `.env` file with your password:
+### 2. Set the Password
+
+Add the password to `.env` (or your host's environment settings):
 
 ```bash
 SESSION_PASSWORD=your-secret-password
 ```
 
-### 3. Configure Types
+On SvelteKit 3, declare it in `src/env.ts` so it can be imported from `$app/env/private`:
+
+```ts
+// src/env.ts
+import { defineEnvVars } from '@sveltejs/kit/env';
+
+export const variables = defineEnvVars({
+	SESSION_PASSWORD: {}
+});
+```
+
+SvelteKit 2 needs no extra step.
+
+### 3. Add the Hook
+
+Create or update `src/hooks.server.ts`:
+
+```ts
+import { SESSION_PASSWORD } from '$app/env/private';
+import { handleSession } from 'sk-sesher';
+
+export const handle = handleSession({ password: () => SESSION_PASSWORD });
+```
+
+<details>
+<summary>SvelteKit 2</summary>
+
+```ts
+import { env } from '$env/dynamic/private';
+import { handleSession } from 'sk-sesher';
+
+export const handle = handleSession({ password: () => env.SESSION_PASSWORD });
+```
+
+</details>
+
+The password is also the key used to sign session cookies, so changing it signs everyone out.
+
+### 4. Configure Types
 
 Update your `src/app.d.ts`:
 
@@ -64,16 +122,6 @@ declare global {
 export {};
 ```
 
-### 4. Add the Hook
-
-Create or update `src/hooks.server.ts`:
-
-```ts
-import { handleSession } from 'sk-sesher';
-
-export const handle = handleSession();
-```
-
 ### 5. Pass Session to Client
 
 Create `src/routes/+layout.server.ts`:
@@ -86,13 +134,12 @@ export const load = ({ locals }) => {
 };
 ```
 
-### 6. Re-export remote functions inside your `lib` folder
+### 6. Re-export the Remote Functions From Your `lib` Folder
 
-Make sure to export them from any file ending in `.remote.ts`.
+SvelteKit only serves remote functions from your own `.remote.ts` files, so re-export them:
 
 ```ts
 // src/lib/remote/auth.remote.ts
-
 export { signIn, signOut } from 'sk-sesher/auth/remote';
 ```
 
@@ -102,14 +149,14 @@ Create `src/routes/+layout.svelte`:
 
 ```svelte
 <script lang="ts">
-	import { signIn, signOut } from '$lib/remote/auth.remote.js';
-	import { invalidateAll } from '$app/navigation';
+	import { signIn, signOut } from '#lib/remote/auth.remote.js';
+	import { refreshAll } from '$app/navigation';
 
 	let { data, children } = $props();
 
 	async function handleSignOut() {
 		await signOut();
-		await invalidateAll();
+		await refreshAll();
 	}
 </script>
 
@@ -123,7 +170,7 @@ Create `src/routes/+layout.svelte`:
 			<input {...signIn.fields._password.as('password')} />
 		</label>
 
-		{#each signIn.fields._password.issues() as issue}
+		{#each signIn.fields._password.issues() as issue (issue)}
 			<p class="error">{issue.message}</p>
 		{/each}
 
@@ -134,107 +181,73 @@ Create `src/routes/+layout.svelte`:
 {/if}
 ```
 
+On SvelteKit 2, import from `$lib/remote/auth.remote.js` and use `invalidateAll` instead of `refreshAll`.
+
 That's it! Your app now has password protection.
 
 ## Configuration
 
-### Custom Options
-
 ```ts
+import { SESSION_PASSWORD } from '$app/env/private';
 import { handleSession } from 'sk-sesher';
 
 export const handle = handleSession({
-	// Environment variable name for the password
-	envKey: 'MY_SECRET_PASSWORD', // default: 'SESSION_PASSWORD'
-
-	// Cookie name for the session
-	cookieName: 'auth', // default: 'session'
-
-	// Session duration in seconds
-	maxAge: 60 * 60 * 24 // default: 7 days
+	password: () => SESSION_PASSWORD,
+	cookieName: 'auth',
+	maxAge: 60 * 60 * 24
 });
 ```
+
+| Option                  | Default           | Description                                                                                    |
+| ----------------------- | ----------------- | ---------------------------------------------------------------------------------------------- |
+| `password`              | _required_        | The shared password, or a function returning it. If it's empty, everyone is signed out.        |
+| `cookieName`            | `'session'`       | Name of the session cookie.                                                                    |
+| `maxAge`                | `604800` (7 days) | Session lifetime in seconds. Sets the cookie's `Max-Age` and is also enforced on the server.   |
+| `failureDelayMs`        | `500`             | Delay before answering a failed sign-in attempt.                                               |
+| `maxFailedAttempts`     | `10`              | Failed attempts allowed per client within `failedAttemptWindowMs`. `0` disables the limit.     |
+| `failedAttemptWindowMs` | `900000` (15 min) | Window over which failed attempts are counted. A locked-out client can try again when it ends. |
 
 ### Using with Other Hooks
 
 ```ts
-import { handleSession } from 'sk-sesher';
 import { sequence } from '@sveltejs/kit/hooks';
 
 export const handle = sequence(
-	handleSession()
+	handleSession({ password: () => SESSION_PASSWORD })
 	// your other hooks...
 );
 ```
 
 ## Remote Functions
 
-This library provides two remote functions for authentication. Please keep in mind to re-export these from _your own `src/lib` folder_, otherwise they won't work. And turn on the experimental flags.
+This library provides two remote functions. Remember to re-export them from _your own `src/lib` folder_ and to enable the experimental flag, or they won't work.
 
 ### `signIn` (form)
 
-A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that handles password authentication with progressive enhancement.
+A [remote form](https://svelte.dev/docs/kit/remote-functions#form) that checks the password, with progressive enhancement.
 
-```svelte
-<script lang="ts">
-	import { signIn } from '$lib/remote/auth.remote.js';
-	import { invalidateAll } from '$app/navigation';
-</script>
-
-<form {...signIn}>
-	<label>
-		Password
-		<input {...signIn.fields._password.as('password')} />
-	</label>
-
-	{#each signIn.fields._password.issues() as issue}
-		<p class="error">{issue.message}</p>
-	{/each}
-
-	<button disabled={!!signIn.pending}>
-		{signIn.pending ? 'Signing in...' : 'Sign In'}
-	</button>
-</form>
-```
-
-**Key features:**
-
-- Spread `{...signIn}` onto your `<form>` element for progressive enhancement
+- Spread `{...signIn}` onto your `<form>` element
 - Use `signIn.fields._password.as('password')` to get the input attributes
-- Access validation issues via `signIn.fields._password.issues()`
-- Check `signIn.result?.error` for server-side errors (e.g., wrong password)
+- Validation errors, a wrong password and a lockout after too many attempts all appear in `signIn.fields._password.issues()`
 - Check `signIn.pending` to show loading state
 
-> **Note:** The password field is named `_password` (with underscore) to prevent it from being sent back to the client on validation errors, as per SvelteKit's [sensitive data handling](https://svelte.dev/docs/kit/remote-functions#form-Handling-sensitive-data).
+> **Note:** The password field is named `_password` (with underscore) so SvelteKit doesn't send it back to the client on validation errors, as per its [sensitive data handling](https://svelte.dev/docs/kit/remote-functions#form-Handling-sensitive-data).
 
 ### `signOut` (command)
 
-A [remote command](https://svelte.dev/docs/kit/remote-functions#command) that clears the session cookie.
-
-```svelte
-<script lang="ts">
-	import { signOut } from '$lib/remote/auth.remote.js';
-	import { invalidateAll } from '$app/navigation';
-
-	async function handleSignOut() {
-		await signOut();
-		await invalidateAll(); // Refresh page data to reflect logged-out state
-	}
-</script>
-
-<button onclick={handleSignOut}>Sign Out</button>
-```
+A [remote command](https://svelte.dev/docs/kit/remote-functions#command) that clears the session cookie. Call `refreshAll()` (or `invalidateAll()` on SvelteKit 2) afterwards so the page reflects the signed-out state.
 
 ## API Reference
 
 ### Exports from `sk-sesher`
 
-| Export          | Type                  | Description                                         |
-| --------------- | --------------------- | --------------------------------------------------- |
-| `handleSession` | `(config?) => Handle` | Creates the session management hook                 |
-| `SessionConfig` | `type`                | Configuration options type                          |
-| `Session`       | `type`                | Session state type (`{ isAuthenticated: boolean }`) |
-| `SessionLocals` | `type`                | Type to extend `App.Locals`                         |
+| Export          | Type                 | Description                                         |
+| --------------- | -------------------- | --------------------------------------------------- |
+| `handleSession` | `(config) => Handle` | Creates the session management hook                 |
+| `SessionConfig` | `type`               | Configuration options type                          |
+| `Session`       | `type`               | Session state type (`{ isAuthenticated: boolean }`) |
+| `SessionLocals` | `type`               | Type to extend `App.Locals`                         |
+| `SessionHandle` | `type`               | The hook type returned by `handleSession`           |
 
 ### Exports from `sk-sesher/auth/remote`
 
@@ -243,21 +256,25 @@ A [remote command](https://svelte.dev/docs/kit/remote-functions#command) that cl
 | `signIn`  | `RemoteForm`    | Form-based sign in with progressive enhancement |
 | `signOut` | `RemoteCommand` | Signs out and clears the session cookie         |
 
-## How It Works
+## Upgrading from 0.0.x
 
-1. **`handleSession`** hook runs on every request, reading the session cookie and populating `locals.session`
-2. **`signIn`** is a remote form function that validates the password against the environment variable and sets a secure cookie
-3. **`signOut`** is a remote command that clears the session cookie
-4. The layout passes session state to the client and conditionally renders content
+- **Upgrade promptly:** in 0.0.x, setting a `session=authenticated` cookie by hand bypassed the password. 0.1.0 only accepts cookies the server has signed.
+- `handleSession()` now requires a `password` option, and the `envKey` option has been removed. Replace `handleSession()` with `handleSession({ password: () => env.SESSION_PASSWORD })` (SvelteKit 2) or the SvelteKit 3 form shown above.
+- Existing sessions are invalidated, so everyone needs to sign in again once.
+- A wrong password is now reported through `signIn.fields._password.issues()` instead of `signIn.result?.error`.
 
 ## Security Notes
 
-- The password is stored as an environment variable and never exposed to the client
-- Session cookies are `httpOnly`, `secure`, and use `sameSite: 'lax'`
-- Session cookies are signed server-side before they are trusted on later requests
-- The password field uses an underscore prefix (`_password`) to prevent it from being echoed back on form errors
-- Invalid password attempts are delayed slightly to make brute-force attempts less efficient
-- This is designed for **personal projects** with a single shared password, not multi-user authentication
+- The password stays on the server and is never sent to the client.
+- Session cookies are HMAC-SHA256 signed with the password, and tampered or forged cookies are rejected.
+- Sessions expire on the server after `maxAge`, so a copied cookie stops working even if the browser keeps sending it.
+- Cookies are `httpOnly` and `sameSite: 'lax'`. They are also `secure` everywhere except `http://localhost` during development (SvelteKit's default).
+- Passwords are compared in constant time.
+- Failed attempts are slowed by `failureDelayMs` and capped per client IP by `maxFailedAttempts`. The counter is kept **in memory**, so:
+  - it resets when the server restarts and isn't shared between instances (for example, separate serverless functions);
+  - behind a reverse proxy, configure your adapter to read the real client IP (e.g. `ADDRESS_HEADER` for `adapter-node`). Otherwise every visitor shares one counter and a lockout affects everyone.
+- Use a long, random password. Throttling slows guessing but can't make a weak password safe.
+- This is designed for **personal projects** with a single shared password, not multi-user authentication.
 
 ## License
 
