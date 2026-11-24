@@ -2,7 +2,7 @@ import { command, form, getRequestEvent } from '$app/server';
 import { error, invalid, type RequestEvent } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { getSessionInternals } from './handler.js';
-import { createSignedSessionValue, delay, timingSafeEqual } from './session.js';
+import { attemptSignIn } from './sign-in.js';
 
 function getClientKey(event: RequestEvent): string {
 	try {
@@ -40,44 +40,35 @@ export const signIn = form(
 	}),
 	async ({ _password }, issue) => {
 		const event = getRequestEvent();
-		const { config, getPassword, limiter } = getSessionInternals(event);
+		const internals = getSessionInternals(event);
+		const result = await attemptSignIn(internals, getClientKey(event), _password);
 
-		const expectedPassword = getPassword();
-
-		if (!expectedPassword) {
-			console.error('[sk-sesher] No password configured; sign-in is unavailable.');
-			error(500, 'Server configuration error');
+		if (!result.ok) {
+			switch (result.reason) {
+				case 'not-configured':
+					console.error('[sk-sesher] No password configured; sign-in is unavailable.');
+					error(500, 'Server configuration error');
+					break;
+				case 'locked': {
+					const minutes = Math.ceil(result.retryAfterMs / 60_000);
+					invalid(
+						issue._password(
+							`Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`
+						)
+					);
+					break;
+				}
+				case 'wrong-password':
+					invalid(issue._password('Password is wrong'));
+			}
 		}
-
-		const clientKey = getClientKey(event);
-		const lockedForMs = limiter.lockedFor(clientKey);
-
-		if (lockedForMs > 0) {
-			await delay(config.failureDelayMs);
-			const minutes = Math.ceil(lockedForMs / 60_000);
-			invalid(
-				issue._password(
-					`Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`
-				)
-			);
-		}
-
-		if (!(await timingSafeEqual(_password, expectedPassword))) {
-			limiter.recordFailure(clientKey);
-			await delay(config.failureDelayMs);
-			invalid(issue._password('Password is wrong'));
-		}
-
-		limiter.reset(clientKey);
-
-		const sessionValue = await createSignedSessionValue(expectedPassword);
 
 		// `secure` is left to SvelteKit's default: on everywhere except http://localhost and dev.
-		event.cookies.set(config.cookieName, sessionValue, {
+		event.cookies.set(internals.config.cookieName, result.sessionValue, {
 			path: '/',
 			httpOnly: true,
 			sameSite: 'lax',
-			maxAge: config.maxAge
+			maxAge: internals.config.maxAge
 		});
 
 		return { success: true };
