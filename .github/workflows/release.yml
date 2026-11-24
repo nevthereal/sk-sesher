@@ -1,0 +1,48 @@
+name: Release
+
+# Publishes to npm when a version tag (e.g. v0.1.1) is pushed.
+# Uses npm trusted publishing (OIDC), so no npm token is stored in the repo.
+# One-time setup on npmjs.com: sk-sesher → Settings → Trusted Publisher →
+# GitHub Actions, repository nevthereal/sk-sesher, workflow file release.yml.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # lets npm verify this workflow and attach provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@11
+
+      - name: Check the tag matches package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run lint
+      - run: bun run test
+
+      # `prepack` builds dist/ and runs publint before the tarball is created.
+      - run: npm publish
